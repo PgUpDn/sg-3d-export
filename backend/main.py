@@ -49,32 +49,22 @@ app = FastAPI(
 )
 
 # Configure CORS
-# FastAPI CORS doesn't support wildcards in allow_origins
-# Use allow_origin_regex for pattern matching or allow all with ["*"]
+# Allow all origins for production (Vercel preview domains change frequently)
+# Use allow_origin_regex to match Vercel domains and allow specific origins
+import re
+
 cors_origins = settings.CORS_ORIGINS
-if "*" in cors_origins:
-    # Allow all origins
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["*"],
-        allow_credentials=False,  # Can't use credentials with allow_origins=["*"]
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-else:
-    # Use regex to match Vercel domains
-    import re
-    vercel_pattern = re.compile(r"https://.*\.vercel\.app$")
-    filtered_origins = [origin for origin in cors_origins if not origin.startswith("https://*")]
-    
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=filtered_origins,
-        allow_origin_regex=r"https://.*\.vercel\.app",  # Match all Vercel preview domains
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+# Filter out wildcard entries
+filtered_origins = [origin for origin in cors_origins if origin != "*" and not origin.startswith("https://*")]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=filtered_origins if filtered_origins else ["*"],  # Fallback to allow all
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Match all Vercel preview domains
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # In-memory job storage (use Redis in production)
 export_jobs: dict[str, ExportJobStatus] = {}
