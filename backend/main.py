@@ -64,6 +64,30 @@ export_jobs: dict[str, ExportJobStatus] = {}
 
 
 # ============================================
+# Startup Event - Preload mesh for faster responses
+# ============================================
+
+@app.on_event("startup")
+async def startup_event():
+    """Preload the STL mesh on startup to avoid loading delays on first request."""
+    print("🚀 Starting SG 3D Export API...")
+    try:
+        processor = get_processor()
+        print(f"📁 Loading STL from: {processor.stl_path}")
+        if processor.load_mesh():
+            bounds = processor.get_bounds()
+            print(f"✅ STL loaded successfully!")
+            print(f"   Triangles: {len(processor._mesh.vectors):,}")
+            print(f"   Bounds: X({bounds['min_x']:.0f} to {bounds['max_x']:.0f})")
+            print(f"           Y({bounds['min_y']:.0f} to {bounds['max_y']:.0f})")
+        else:
+            print("⚠️ Warning: Could not load STL file")
+    except Exception as e:
+        print(f"❌ Error during startup: {e}")
+        # Don't crash, just warn - file might load later
+
+
+# ============================================
 # Health Check
 # ============================================
 
@@ -356,7 +380,7 @@ async def process_export_job(job_id: str, district_id: str):
 @app.post("/api/export/start", response_model=ExportJobStatus)
 async def start_export(
     district_id: str = Query(..., description="District ID to export"),
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = BackgroundTasks()
 ):
     """
     Start an export job for a district.
@@ -367,23 +391,33 @@ async def start_export(
     Args:
         district_id: The district identifier
     """
-    district = next((d for d in SINGAPORE_DISTRICTS if d.id == district_id), None)
-    if not district:
-        raise HTTPException(status_code=404, detail=f"District {district_id} not found")
+    import traceback
     
-    job_id = str(uuid.uuid4())
-    
-    export_jobs[job_id] = ExportJobStatus(
-        job_id=job_id,
-        district_id=district_id,
-        status=SelectionStatus.PROCESSING,
-        progress=0
-    )
-    
-    if background_tasks:
+    try:
+        district = next((d for d in SINGAPORE_DISTRICTS if d.id == district_id), None)
+        if not district:
+            raise HTTPException(status_code=404, detail=f"District {district_id} not found")
+        
+        job_id = str(uuid.uuid4())
+        
+        export_jobs[job_id] = ExportJobStatus(
+            job_id=job_id,
+            district_id=district_id,
+            status=SelectionStatus.PROCESSING,
+            progress=0
+        )
+        
+        # Always add background task
         background_tasks.add_task(process_export_job, job_id, district_id)
+        
+        return export_jobs[job_id]
     
-    return export_jobs[job_id]
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in start_export: {e}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.get("/api/export/{job_id}", response_model=ExportJobStatus)
@@ -482,29 +516,49 @@ async def get_district_mesh_preview(
     
     Default radius varies by district (e.g., NTU campus needs larger radius).
     """
-    district = next((d for d in SINGAPORE_DISTRICTS if d.id == district_id), None)
-    if not district:
-        raise HTTPException(status_code=404, detail=f"District {district_id} not found")
+    import traceback
     
-    # Use default radius if not specified
-    if radius is None:
-        radius = DISTRICT_RADIUS.get(district_id, 600)
+    try:
+        district = next((d for d in SINGAPORE_DISTRICTS if d.id == district_id), None)
+        if not district:
+            raise HTTPException(status_code=404, detail=f"District {district_id} not found")
+        
+        # Use default radius if not specified
+        if radius is None:
+            radius = DISTRICT_RADIUS.get(district_id, 600)
+        
+        processor = get_processor()
+        
+        if not processor.load_mesh():
+            raise HTTPException(status_code=500, detail="Could not load mesh - check memory")
+        
+        # Clip by district using geographic coordinates
+        clipped = processor.clip_by_district(district.lat, district.lng, radius)
+        
+        if clipped is None or len(clipped.vectors) == 0:
+            # If no buildings found, try larger radius
+            clipped = processor.clip_by_district(district.lat, district.lng, radius * 2)
+        
+        if clipped is None or len(clipped.vectors) == 0:
+            return {
+                "error": f"No buildings found near {district.name}",
+                "vertices": [],
+                "normals": [],
+                "triangleCount": 0,
+                "originalTriangles": 0,
+                "center": [0, 0, 0],
+                "scale": 1.0
+            }
+        
+        return processor.mesh_to_json(clipped, simplify=True, max_triangles=max_triangles)
     
-    processor = get_processor()
-    
-    if not processor.load_mesh():
-        raise HTTPException(status_code=500, detail="Could not load mesh")
-    
-    # Clip by district using geographic coordinates
-    clipped = processor.clip_by_district(district.lat, district.lng, radius)
-    
-    if clipped is None or len(clipped.vectors) == 0:
-        # If no buildings found, try larger radius
-        clipped = processor.clip_by_district(district.lat, district.lng, radius * 2)
-    
-    if clipped is None or len(clipped.vectors) == 0:
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Error in get_district_mesh_preview: {e}")
+        print(traceback.format_exc())
         return {
-            "error": f"No buildings found near {district.name}",
+            "error": str(e),
             "vertices": [],
             "normals": [],
             "triangleCount": 0,
@@ -512,8 +566,6 @@ async def get_district_mesh_preview(
             "center": [0, 0, 0],
             "scale": 1.0
         }
-    
-    return processor.mesh_to_json(clipped, simplify=True, max_triangles=max_triangles)
 
 
 @app.get("/api/mesh/clip/download")
