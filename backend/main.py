@@ -49,19 +49,12 @@ app = FastAPI(
 )
 
 # Configure CORS
-# Allow all origins for production (Vercel preview domains change frequently)
-# Use allow_origin_regex to match Vercel domains and allow specific origins
-import re
-
-cors_origins = settings.CORS_ORIGINS
-# Filter out wildcard entries
-filtered_origins = [origin for origin in cors_origins if origin != "*" and not origin.startswith("https://*")]
-
+# Simple approach: allow all origins for production
+# This is safe for read-only APIs or when authentication is handled separately
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=filtered_origins if filtered_origins else ["*"],  # Fallback to allow all
-    allow_origin_regex=r"https://.*\.vercel\.app",  # Match all Vercel preview domains
-    allow_credentials=True,
+    allow_origins=["*"],  # Allow all origins
+    allow_credentials=False,  # Must be False when allow_origins=["*"]
     allow_methods=["*"],
     allow_headers=["*"],
 )
