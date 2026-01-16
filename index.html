@@ -1,0 +1,77 @@
+
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SG 3D Export | Urban Planning Suite</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1" rel="stylesheet">
+  <!-- Leaflet GIS Engine -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: '#0891b2',
+            'background-light': '#f8fafc',
+            'panel-light': '#ffffff',
+            'border-light': '#e2e8f0',
+          },
+          fontFamily: {
+            sans: ['Space Grotesk', 'sans-serif'],
+          },
+        }
+      }
+    }
+  </script>
+  <style>
+    body {
+      background-color: #f8fafc;
+      color: #1e293b;
+      margin: 0;
+      overflow: hidden;
+    }
+    .selection-glow {
+      box-shadow: 0 0 0 4px rgba(8, 145, 178, 0.1);
+    }
+    .wireframe-grid {
+      background-image: linear-gradient(rgba(8, 145, 178, 0.05) 1px, transparent 1px),
+                        linear-gradient(90deg, rgba(8, 145, 178, 0.05) 1px, transparent 1px);
+      background-size: 20px 20px;
+    }
+    #map {
+      height: 100%;
+      width: 100%;
+      background: #f1f5f9;
+    }
+    .leaflet-control-zoom {
+      display: none !important;
+    }
+    .leaflet-container {
+      background: #f1f5f9 !important;
+    }
+  </style>
+<script type="importmap">
+{
+  "imports": {
+    "@google/genai": "https://esm.sh/@google/genai@^1.36.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.3/",
+    "react/": "https://esm.sh/react@^19.2.3/",
+    "react": "https://esm.sh/react@^19.2.3",
+    "three": "https://esm.sh/three@0.160.0",
+    "three/": "https://esm.sh/three@0.160.0/"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+<body>
+  <div id="root"></div>
+<script type="module" src="/index.tsx"></script>
+</body>
+</html>

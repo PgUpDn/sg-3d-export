@@ -1,0 +1,46 @@
+# Dependencies
+node_modules/
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+
+# Build outputs
+dist/
+build/
+*.pyc
+*.pyo
+*.pyd
+
+# Environment variables
+.env
+.env.local
+.env.production
+.env.development
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# STL files (too large for git, use Git LFS or cloud storage)
+# *.stl
+
+# Generated images
+*.png
+!favicon.png
+
+# Calibration outputs
+calibration_params.txt
+check_network.sh

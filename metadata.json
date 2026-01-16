@@ -1,0 +1,8 @@
+
+{
+  "name": "SG 3D Export Professional",
+  "description": "A sophisticated geospatial tool for urban planners and architects to select, preview, and export 3D building data of Singapore in STL format.",
+  "requestFramePermissions": [
+    "geolocation"
+  ]
+}
