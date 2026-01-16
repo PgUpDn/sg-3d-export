@@ -29,12 +29,14 @@ class Settings:
     if _cors_origins_env:
         CORS_ORIGINS: list = [origin.strip() for origin in _cors_origins_env.split(",")]
     else:
+        # Default: allow localhost and all Vercel preview domains
         CORS_ORIGINS: list = [
             "http://localhost:5173",
             "http://localhost:3000",
             "http://127.0.0.1:5173",
             "http://127.0.0.1:3000",
-            "*"  # Allow all for development
+            "https://*.vercel.app",  # All Vercel preview domains
+            "*"  # Allow all for development and production
         ]
 
 
