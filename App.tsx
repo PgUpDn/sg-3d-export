@@ -281,36 +281,15 @@ const App: React.FC = () => {
   const handleDownload = async () => {
     try {
       if (USE_BACKEND_API && backendAvailable) {
-        // Download clipped STL via backend API
-        // Calculate viewport bounds based on district
-        const sg_lat_min = 1.22, sg_lat_max = 1.47;
-        const sg_lng_min = 103.6, sg_lng_max = 104.0;
-        
-        const norm_x = (selectedDistrict.lng - sg_lng_min) / (sg_lng_max - sg_lng_min);
-        const norm_y = (selectedDistrict.lat - sg_lat_min) / (sg_lat_max - sg_lat_min);
-        
-        const viewport_size = 0.25;
-        const x_start = Math.max(0, norm_x - viewport_size / 2);
-        const x_end = Math.min(1, norm_x + viewport_size / 2);
-        const y_start = Math.max(0, norm_y - viewport_size / 2);
-        const y_end = Math.min(1, norm_y + viewport_size / 2);
-        
-        const downloadUrl = getClippedSTLDownloadUrl(x_start, x_end, y_start, y_end, selectedDistrict.id);
-        
-        // Trigger download
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = `${selectedDistrict.name.replace(/\s+/g, '_')}_SG_3D.stl`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+        // Download clipped STL via district endpoint
+        await downloadSTL(selectedDistrict.id, selectedDistrict.name);
       } else {
         // Fallback: show alert
         alert(`Exporting high-fidelity STL: ${selectedDistrict.name}_SG_3D.stl`);
       }
     } catch (error) {
       console.error('Download error:', error);
-    alert(`Exporting high-fidelity STL: ${selectedDistrict.name}_SG_3D.stl`);
+      alert(`Exporting high-fidelity STL: ${selectedDistrict.name}_SG_3D.stl`);
     }
   };
 
