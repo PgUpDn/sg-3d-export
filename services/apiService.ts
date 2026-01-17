@@ -15,8 +15,8 @@ function getApiBaseUrl(): string {
     return 'http://localhost:8000';
   }
   
-  // Production: use the deployed backend server
-  return 'http://52.203.122.189';
+  // Production: use the deployed backend server (HTTPS)
+  return 'https://52.203.122.189.nip.io';
 }
 
 const API_BASE_URL = getApiBaseUrl();
