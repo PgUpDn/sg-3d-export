@@ -3,22 +3,20 @@
  * Handles all communication with the FastAPI backend
  */
 
-// Backend API base URL - auto-detect from current host
+// Backend API base URL
 function getApiBaseUrl(): string {
   // Use environment variable if set
   if (import.meta.env.VITE_API_URL) {
     return import.meta.env.VITE_API_URL;
   }
   
-  // Auto-detect from current window location
-  if (typeof window !== 'undefined') {
-    const host = window.location.hostname;
-    const port = '8000';
-    return `http://${host}:${port}`;
+  // In development (localhost), use local backend
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:8000';
   }
   
-  // Fallback to localhost
-  return 'http://localhost:8000';
+  // Production: use the deployed backend server
+  return 'http://52.203.122.189';
 }
 
 const API_BASE_URL = getApiBaseUrl();
