@@ -54,7 +54,10 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
       setLoading(true);
       setError(null);
       
-      const response = await fetch(`${getApiBaseUrl()}/api/buildings/geojson?limit=100000`);
+      // Limit to 30000 buildings for performance (still ~10MB)
+      const response = await fetch(`${getApiBaseUrl()}/api/buildings/geojson?limit=30000`, {
+        signal: AbortSignal.timeout(60000) // 60 second timeout
+      });
       if (!response.ok) throw new Error('Failed to fetch buildings');
       
       const data = await response.json();
@@ -63,7 +66,7 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
       setLoading(false);
     } catch (err: any) {
       console.error('Error fetching buildings:', err);
-      setError(err.message);
+      setError(err.message || 'Request timed out');
       setLoading(false);
     }
   }, [backendAvailable]);
