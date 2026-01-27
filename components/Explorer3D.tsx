@@ -112,14 +112,16 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
       )}
 
       {/* Error message */}
-      {error && (
+      {error && !loading && (
         <div className="absolute inset-0 bg-white/90 z-50 flex items-center justify-center">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md text-center">
+            <div className="text-4xl mb-3">⚠️</div>
             <h3 className="text-red-800 font-bold mb-2">Error Loading Buildings</h3>
-            <p className="text-red-600 text-sm">{error}</p>
+            <p className="text-red-600 text-sm mb-1">{error}</p>
+            <p className="text-red-400 text-xs mb-4">API: {getApiBaseUrl()}</p>
             <button 
               onClick={fetchBuildings}
-              className="mt-4 px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
             >
               Retry
             </button>
