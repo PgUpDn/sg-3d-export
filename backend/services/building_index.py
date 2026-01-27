@@ -52,6 +52,18 @@ class BuildingIndex:
         self.buildings: List[Building] = []
         self._indexed = False
     
+    def _parse_height_from_filename(self, way_code: str) -> float:
+        """
+        Parse the Z (height) value from the filename.
+        Filename format: building_000001_X_10141.59_Y_-6098.70_Z_66.93
+        The Z value represents the building height.
+        """
+        import re
+        match = re.search(r'_Z_([-\d.]+)', way_code)
+        if match:
+            return float(match.group(1))
+        return 10.0  # Default height if not found
+    
     def build_index(self) -> int:
         """
         Load building index from CSV file.
@@ -76,13 +88,16 @@ class BuildingIndex:
                 
                 # Only add if file exists
                 if file_path.exists():
+                    # Parse height from filename (Z value), not from CSV
+                    height = self._parse_height_from_filename(way_code)
+                    
                     building = Building(
                         way_code=way_code,
                         lat=float(row['lat']),
                         lon=float(row['lon']),
                         blender_x=float(row['blender_x']),
                         blender_y=float(row['blender_y']),
-                        height_m=float(row['height_m']),
+                        height_m=height,
                         file_path=file_path
                     )
                     self.buildings.append(building)
