@@ -24,14 +24,14 @@ const USE_BACKEND_API = true;
 
 // District radii in meters - must match backend DISTRICT_RADIUS
 const DISTRICT_RADIUS: Record<string, number> = {
-  "1": 600,   // Punggol
-  "2": 600,   // Sengkang
-  "3": 600,   // Hougang
-  "4": 600,   // Pasir Ris
+  "1": 600,   // Marina Bay
+  "2": 500,   // Orchard
+  "3": 800,   // Jurong West
+  "4": 700,   // Tampines
   "5": 800,   // Woodlands
-  "6": 800,   // Sembawang
-  "7": 600,   // Tampines
-  "8": 600,   // Ang Mo Kio
+  "6": 600,   // One North
+  "7": 1200,  // NUS
+  "8": 2000,  // NTU
 };
 
 const App: React.FC = () => {
