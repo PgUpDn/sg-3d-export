@@ -207,6 +207,104 @@ async def get_buildings_geojson(
     }
 
 
+@app.get("/api/buildings/viewport")
+async def get_buildings_in_viewport(
+    lat_min: float = Query(..., description="Min latitude"),
+    lat_max: float = Query(..., description="Max latitude"),
+    lon_min: float = Query(..., description="Min longitude"),
+    lon_max: float = Query(..., description="Max longitude"),
+    limit: int = Query(5000, description="Max buildings to return")
+):
+    """
+    Get buildings within a viewport for 3D rendering.
+    Returns building data with Blender coordinates for STL positioning.
+    """
+    building_index = get_building_index()
+    building_index.ensure_indexed()
+    
+    buildings = building_index.find_buildings_in_bounds(lat_min, lat_max, lon_min, lon_max)
+    
+    # Apply limit
+    if len(buildings) > limit:
+        step = len(buildings) // limit
+        buildings = buildings[::step][:limit]
+    
+    return {
+        "count": len(buildings),
+        "buildings": [
+            {
+                "id": b.way_code,
+                "lat": b.lat,
+                "lon": b.lon,
+                "blender_x": b.blender_x,
+                "blender_y": b.blender_y,
+                "height": b.height_m,
+                "stl_url": f"/api/buildings/stl/{b.way_code}"
+            }
+            for b in buildings
+        ]
+    }
+
+
+@app.get("/api/buildings/stl/{building_id}")
+async def get_building_stl(building_id: str):
+    """
+    Get STL file for a specific building.
+    """
+    building_index = get_building_index()
+    building_index.ensure_indexed()
+    
+    # Find the building
+    building = next((b for b in building_index.buildings if b.way_code == building_id), None)
+    if not building:
+        raise HTTPException(status_code=404, detail=f"Building {building_id} not found")
+    
+    if not building.file_path.exists():
+        raise HTTPException(status_code=404, detail=f"STL file not found for {building_id}")
+    
+    return FileResponse(
+        path=building.file_path,
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{building_id}.stl"'}
+    )
+
+
+@app.get("/api/buildings/batch-stl")
+async def get_batch_buildings_stl(
+    lat_min: float = Query(...),
+    lat_max: float = Query(...),
+    lon_min: float = Query(...),
+    lon_max: float = Query(...),
+    limit: int = Query(500, description="Max buildings to merge")
+):
+    """
+    Get merged STL for buildings in viewport.
+    Returns a single binary STL containing all buildings.
+    """
+    building_index = get_building_index()
+    building_index.ensure_indexed()
+    
+    buildings = building_index.find_buildings_in_bounds(lat_min, lat_max, lon_min, lon_max)
+    
+    if len(buildings) > limit:
+        step = len(buildings) // limit
+        buildings = buildings[::step][:limit]
+    
+    if not buildings:
+        raise HTTPException(status_code=404, detail="No buildings in viewport")
+    
+    stl_bytes = building_index.merge_buildings_to_stl(buildings)
+    
+    if not stl_bytes:
+        raise HTTPException(status_code=500, detail="Failed to merge buildings")
+    
+    return StreamingResponse(
+        io.BytesIO(stl_bytes),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": 'attachment; filename="viewport_buildings.stl"'}
+    )
+
+
 # ============================================
 # District APIs
 # ============================================

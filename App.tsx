@@ -2,7 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
-import Explorer3D from './components/Explorer3D';
+import Explorer3DReal from './components/Explorer3DReal';
 import { AppRoute, SelectionStats, District } from './types';
 import { SINGAPORE_DISTRICTS } from './constants';
 import { getUrbanInsight } from './services/geminiService';
@@ -302,7 +302,7 @@ const App: React.FC = () => {
         {/* Explorer 3D View */}
         {activeRoute === AppRoute.EXPLORER && (
           <div className="flex-1 relative">
-            <Explorer3D backendAvailable={backendAvailable} />
+            <Explorer3DReal backendAvailable={backendAvailable} />
           </div>
         )}
         
