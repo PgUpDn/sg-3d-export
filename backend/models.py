@@ -59,7 +59,6 @@ class ExportJobStatus(BaseModel):
 
 
 # Predefined Singapore districts data
-# Coordinates adjusted to center on building-dense areas
 SINGAPORE_DISTRICTS = [
     District(id="1", name="Marina Bay", region="Central Region", lat=1.2847, lng=103.8597),
     District(id="2", name="Orchard", region="Central Region", lat=1.3048, lng=103.8318),

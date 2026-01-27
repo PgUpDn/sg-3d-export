@@ -37,6 +37,7 @@ from services.stl_service import (
 )
 from services.stl_processor import get_processor, STLProcessor
 from services.stl_visualizer import generate_topdown_image, generate_density_heatmap
+from services.building_index import get_building_index, BuildingIndex
 
 
 # Initialize FastAPI app
@@ -69,22 +70,22 @@ export_jobs: dict[str, ExportJobStatus] = {}
 
 @app.on_event("startup")
 async def startup_event():
-    """Preload the STL mesh on startup to avoid loading delays on first request."""
+    """Initialize building index on startup."""
     print("🚀 Starting SG 3D Export API...")
     try:
-        processor = get_processor()
-        print(f"📁 Loading STL from: {processor.stl_path}")
-        if processor.load_mesh():
-            bounds = processor.get_bounds()
-            print(f"✅ STL loaded successfully!")
-            print(f"   Triangles: {len(processor._mesh.vectors):,}")
-            print(f"   Bounds: X({bounds['min_x']:.0f} to {bounds['max_x']:.0f})")
-            print(f"           Y({bounds['min_y']:.0f} to {bounds['max_y']:.0f})")
-        else:
-            print("⚠️ Warning: Could not load STL file")
+        # Initialize building index (primary method)
+        building_index = get_building_index()
+        count = building_index.build_index()
+        print(f"✅ Building index ready: {count:,} buildings")
+        
+        stats = building_index.get_stats()
+        if stats.get("lat_range"):
+            print(f"   Lat range: {stats['lat_range'][0]:.6f} to {stats['lat_range'][1]:.6f}")
+            print(f"   Lon range: {stats['lon_range'][0]:.6f} to {stats['lon_range'][1]:.6f}")
     except Exception as e:
         print(f"❌ Error during startup: {e}")
-        # Don't crash, just warn - file might load later
+        import traceback
+        traceback.print_exc()
 
 
 # ============================================
@@ -100,6 +101,109 @@ async def health_check():
         "service": "SG 3D Export API",
         "version": "2.0.0",
         "stl_file": stl_info
+    }
+
+
+# ============================================
+# 3D Explorer API - All Buildings
+# ============================================
+
+@app.get("/api/buildings/all")
+async def get_all_buildings(
+    limit: Optional[int] = Query(None, description="Limit number of buildings returned"),
+    lat_min: Optional[float] = Query(None, description="Min latitude"),
+    lat_max: Optional[float] = Query(None, description="Max latitude"),
+    lon_min: Optional[float] = Query(None, description="Min longitude"),
+    lon_max: Optional[float] = Query(None, description="Max longitude")
+):
+    """
+    Get all building data for 3D visualization.
+    
+    Returns lat, lon, and height for each building.
+    Can filter by bounds for viewport-based loading.
+    """
+    building_index = get_building_index()
+    building_index.ensure_indexed()
+    
+    buildings = building_index.buildings
+    
+    # Filter by bounds if provided
+    if all([lat_min, lat_max, lon_min, lon_max]):
+        buildings = [b for b in buildings 
+                    if lat_min <= b.lat <= lat_max and lon_min <= b.lon <= lon_max]
+    
+    # Apply limit if provided
+    if limit and len(buildings) > limit:
+        # Sample evenly
+        step = len(buildings) // limit
+        buildings = buildings[::step][:limit]
+    
+    return {
+        "count": len(buildings),
+        "buildings": [
+            {
+                "lat": b.lat,
+                "lon": b.lon,
+                "height": b.height_m,
+                "id": b.way_code
+            }
+            for b in buildings
+        ]
+    }
+
+
+@app.get("/api/buildings/geojson")
+async def get_buildings_geojson(
+    limit: Optional[int] = Query(50000, description="Limit number of buildings"),
+    lat_min: Optional[float] = Query(None),
+    lat_max: Optional[float] = Query(None),
+    lon_min: Optional[float] = Query(None),
+    lon_max: Optional[float] = Query(None)
+):
+    """
+    Get buildings as GeoJSON for deck.gl visualization.
+    """
+    building_index = get_building_index()
+    building_index.ensure_indexed()
+    
+    buildings = building_index.buildings
+    
+    # Filter by bounds if provided
+    if all([lat_min, lat_max, lon_min, lon_max]):
+        buildings = [b for b in buildings 
+                    if lat_min <= b.lat <= lat_max and lon_min <= b.lon <= lon_max]
+    
+    # Apply limit
+    if limit and len(buildings) > limit:
+        step = len(buildings) // limit
+        buildings = buildings[::step][:limit]
+    
+    features = []
+    for b in buildings:
+        # Create a small polygon for each building (approximate footprint)
+        # Using ~10m offset for building size
+        offset = 0.00005  # roughly 5m
+        features.append({
+            "type": "Feature",
+            "properties": {
+                "height": b.height_m * 3,  # Scale height for visibility
+                "id": b.way_code
+            },
+            "geometry": {
+                "type": "Polygon",
+                "coordinates": [[
+                    [b.lon - offset, b.lat - offset],
+                    [b.lon + offset, b.lat - offset],
+                    [b.lon + offset, b.lat + offset],
+                    [b.lon - offset, b.lat + offset],
+                    [b.lon - offset, b.lat - offset]
+                ]]
+            }
+        })
+    
+    return {
+        "type": "FeatureCollection",
+        "features": features
     }
 
 
@@ -134,9 +238,9 @@ async def get_district(district_id: str):
 @app.get("/api/districts/{district_id}/stats", response_model=SelectionStats)
 async def get_district_stats(district_id: str):
     """
-    Get selection statistics for a district.
+    Get selection statistics for a district using building index.
     
-    Returns actual building count and file size based on STL data.
+    Returns actual building count based on indexed buildings.
     
     Args:
         district_id: The district identifier
@@ -146,29 +250,20 @@ async def get_district_stats(district_id: str):
     if not district:
         raise HTTPException(status_code=404, detail=f"District {district_id} not found")
     
-    # Get actual stats from STL data
-    processor = get_processor()
-    if not processor.load_mesh():
-        # Fallback to estimates if STL can't be loaded
-        buildings, file_size = estimate_selection_stats(district_id)
-        return SelectionStats(
-            buildings=buildings,
-            file_size=file_size,
-            status=SelectionStatus.READY,
-            progress=100
-        )
-    
     # Use default radius for the district
     radius = DISTRICT_RADIUS.get(district_id, 600)
     
-    # Clip the mesh for this district
-    clipped = processor.clip_by_district(district.lat, district.lng, radius)
+    # Calculate rectangular bounds (matches frontend)
+    bounds = calculate_bounds(district.lat, district.lng, radius)
     
-    if clipped is None or len(clipped.vectors) == 0:
-        # Try larger radius if no buildings found
-        clipped = processor.clip_by_district(district.lat, district.lng, radius * 2)
+    # Use building index to find buildings in rectangular bounds
+    building_index = get_building_index()
+    buildings = building_index.find_buildings_in_bounds(
+        bounds['lat_min'], bounds['lat_max'],
+        bounds['lon_min'], bounds['lon_max']
+    )
     
-    if clipped is None or len(clipped.vectors) == 0:
+    if not buildings:
         return SelectionStats(
             buildings=0,
             file_size="0 MB",
@@ -177,21 +272,15 @@ async def get_district_stats(district_id: str):
         )
     
     # Calculate actual statistics
-    triangle_count = len(clipped.vectors)
+    building_count = len(buildings)
     
-    # Estimate building count: assume average 50-200 triangles per building
-    # This is a rough estimate - actual buildings vary widely
-    # Use a more conservative estimate: 100 triangles per building on average
-    estimated_buildings = max(1, triangle_count // 100)
-    
-    # Calculate file size: estimate ~100 bytes per triangle for binary STL
-    # (12 bytes per vertex * 3 vertices + 12 bytes normal + 2 bytes attribute = 50 bytes)
-    # Plus header (80 bytes) and triangle count (4 bytes)
-    estimated_size_bytes = triangle_count * 50 + 84
+    # Estimate file size based on building count and average size
+    # Average building STL is about 1-2 KB
+    estimated_size_bytes = building_count * 1500
     estimated_size_mb = estimated_size_bytes / (1024 * 1024)
     
     return SelectionStats(
-        buildings=estimated_buildings,
+        buildings=building_count,
         file_size=f"{estimated_size_mb:.1f} MB",
         status=SelectionStatus.READY,
         progress=100
@@ -296,13 +385,32 @@ async def download_stl(
     )
 
 
+def calculate_bounds(lat: float, lng: float, radius_meters: float):
+    """
+    Calculate rectangular bounds from center + radius.
+    Matches frontend calculation for consistent selection.
+    """
+    import math
+    # 1 degree latitude ≈ 111,320 meters
+    # 1 degree longitude ≈ 111,320 * cos(lat) meters
+    lat_offset = radius_meters / 111320
+    lng_offset = radius_meters / (111320 * math.cos(math.radians(lat)))
+    
+    return {
+        'lat_min': lat - lat_offset,
+        'lat_max': lat + lat_offset,
+        'lon_min': lng - lng_offset,
+        'lon_max': lng + lng_offset
+    }
+
+
 @app.get("/api/districts/{district_id}/stl")
 async def download_district_stl(district_id: str):
     """
-    Download STL file for a specific district.
+    Download STL file for a specific district using building index.
     
-    In production, this would clip/extract the district-specific
-    geometry. Currently returns the full model.
+    Finds all buildings within the district rectangular bounds and merges them.
+    Uses rectangular selection to match frontend display.
     
     Args:
         district_id: The district identifier
@@ -311,20 +419,36 @@ async def download_district_stl(district_id: str):
     if not district:
         raise HTTPException(status_code=404, detail=f"District {district_id} not found")
     
-    stl_path = get_stl_file_path()
+    # Get radius for district
+    radius = DISTRICT_RADIUS.get(district_id, 600)
     
-    if not stl_path.exists():
-        raise HTTPException(
-            status_code=404,
-            detail="STL file not found"
-        )
+    # Calculate rectangular bounds (matches frontend)
+    bounds = calculate_bounds(district.lat, district.lng, radius)
+    
+    # Use building index to find buildings in rectangular bounds
+    building_index = get_building_index()
+    buildings = building_index.find_buildings_in_bounds(
+        bounds['lat_min'], bounds['lat_max'],
+        bounds['lon_min'], bounds['lon_max']
+    )
+    
+    print(f"District {district.name}: found {len(buildings)} buildings in bounds")
+    
+    if not buildings:
+        raise HTTPException(status_code=404, detail=f"No buildings found in {district.name}")
+    
+    # Merge buildings to STL
+    stl_bytes = building_index.merge_buildings_to_stl(buildings)
+    
+    if not stl_bytes:
+        raise HTTPException(status_code=500, detail="Failed to generate STL")
     
     filename = f"{district.name.replace(' ', '_')}_SG_3D.stl"
     
-    return FileResponse(
-        path=stl_path,
-        filename=filename,
-        media_type="application/octet-stream"
+    return StreamingResponse(
+        io.BytesIO(stl_bytes),
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'}
     )
 
 
@@ -489,16 +613,15 @@ async def get_mesh_preview(
 
 
 # Default radius for each district (in meters)
-# Larger areas like universities need bigger radius
 DISTRICT_RADIUS = {
     "1": 600,   # Marina Bay
-    "2": 500,   # Orchard - dense area
-    "3": 800,   # Jurong West - residential
-    "4": 700,   # Tampines - residential
-    "5": 800,   # Woodlands - residential
-    "6": 600,   # One North - tech park
-    "7": 1200,  # NUS - large campus
-    "8": 2000,  # NTU - very large campus
+    "2": 500,   # Orchard
+    "3": 800,   # Jurong West
+    "4": 700,   # Tampines
+    "5": 800,   # Woodlands
+    "6": 600,   # One North
+    "7": 1200,  # NUS
+    "8": 2000,  # NTU
 }
 
 
@@ -509,10 +632,10 @@ async def get_district_mesh_preview(
     max_triangles: int = Query(5000, description="Max triangles for preview")
 ):
     """
-    Get mesh preview for a specific district.
+    Get mesh preview for a specific district using building index.
     
-    Clips buildings within the specified radius around the district center.
-    Uses coordinate conversion for accurate positioning.
+    Finds buildings within the specified radius around the district center.
+    Uses correct Blender->WGS84 coordinate transformation.
     
     Default radius varies by district (e.g., NTU campus needs larger radius).
     """
@@ -527,30 +650,30 @@ async def get_district_mesh_preview(
         if radius is None:
             radius = DISTRICT_RADIUS.get(district_id, 600)
         
-        processor = get_processor()
+        # Calculate rectangular bounds (matches frontend)
+        bounds = calculate_bounds(district.lat, district.lng, radius)
         
-        if not processor.load_mesh():
-            raise HTTPException(status_code=500, detail="Could not load mesh - check memory")
+        # Use building index to find buildings in rectangular bounds
+        building_index = get_building_index()
+        buildings = building_index.find_buildings_in_bounds(
+            bounds['lat_min'], bounds['lat_max'],
+            bounds['lon_min'], bounds['lon_max']
+        )
         
-        # Clip by district using geographic coordinates
-        clipped = processor.clip_by_district(district.lat, district.lng, radius)
+        print(f"Preview for {district.name}: found {len(buildings)} buildings in bounds")
         
-        if clipped is None or len(clipped.vectors) == 0:
-            # If no buildings found, try larger radius
-            clipped = processor.clip_by_district(district.lat, district.lng, radius * 2)
-        
-        if clipped is None or len(clipped.vectors) == 0:
+        if not buildings:
             return {
                 "error": f"No buildings found near {district.name}",
                 "vertices": [],
                 "normals": [],
                 "triangleCount": 0,
-                "originalTriangles": 0,
+                "buildingCount": 0,
                 "center": [0, 0, 0],
                 "scale": 1.0
             }
         
-        return processor.mesh_to_json(clipped, simplify=True, max_triangles=max_triangles)
+        return building_index.get_buildings_preview_data(buildings, max_triangles=max_triangles)
     
     except HTTPException:
         raise
@@ -562,7 +685,7 @@ async def get_district_mesh_preview(
             "vertices": [],
             "normals": [],
             "triangleCount": 0,
-            "originalTriangles": 0,
+            "buildingCount": 0,
             "center": [0, 0, 0],
             "scale": 1.0
         }

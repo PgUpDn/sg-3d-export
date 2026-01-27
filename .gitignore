@@ -44,3 +44,7 @@ yarn-error.log*
 # Calibration outputs
 calibration_params.txt
 check_network.sh
+exported_stls_blender_coords/
+building_data_final.csv
+*.7z
+exported_stls/

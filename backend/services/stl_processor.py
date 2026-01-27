@@ -323,8 +323,9 @@ class STLProcessor:
         # Create binary STL
         buffer = io.BytesIO()
         
-        # Header (80 bytes)
-        header = b'Binary STL exported from SG 3D Export' + b'\0' * (80 - 38)
+        # Header (80 bytes) - must be exactly 80 bytes
+        header_text = b'Binary STL exported from SG 3D Export'
+        header = header_text + b'\0' * (80 - len(header_text))
         buffer.write(header)
         
         # Number of triangles

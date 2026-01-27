@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import Header from './components/Header';
 import Sidebar from './components/Sidebar';
+import Explorer3D from './components/Explorer3D';
 import { AppRoute, SelectionStats, District } from './types';
 import { SINGAPORE_DISTRICTS } from './constants';
 import { getUrbanInsight } from './services/geminiService';
@@ -298,7 +299,16 @@ const App: React.FC = () => {
       <Header activeRoute={activeRoute} setActiveRoute={setActiveRoute} />
       
       <main className="flex-1 flex overflow-hidden relative">
-        {/* Map Workspace */}
+        {/* Explorer 3D View */}
+        {activeRoute === AppRoute.EXPLORER && (
+          <div className="flex-1 relative">
+            <Explorer3D backendAvailable={backendAvailable} />
+          </div>
+        )}
+        
+        {/* Export Manager - Map Workspace */}
+        {activeRoute === AppRoute.EXPORT_MANAGER && (
+        <>
         <div className="flex-1 relative bg-slate-100 overflow-hidden">
           {/* Real Leaflet Map */}
           <div id="map" className="z-0" />
@@ -391,6 +401,18 @@ const App: React.FC = () => {
           meshLoading={meshLoading}
           meshError={meshError}
         />
+        </>
+        )}
+        
+        {/* Placeholder for other routes */}
+        {(activeRoute === AppRoute.ANALYTICS || activeRoute === AppRoute.ARCHIVE) && (
+          <div className="flex-1 flex items-center justify-center bg-slate-50">
+            <div className="text-center">
+              <span className="material-symbols-outlined text-6xl text-slate-300">construction</span>
+              <p className="mt-4 text-slate-400 font-semibold">{activeRoute} - Coming Soon</p>
+            </div>
+          </div>
+        )}
       </main>
 
       {/* Footer Info */}
