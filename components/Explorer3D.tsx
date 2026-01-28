@@ -300,3 +300,4 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
 };
 
 export default Explorer3D;
+// Build timestamp: 1769561725
