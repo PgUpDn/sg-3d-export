@@ -49,7 +49,7 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
     
     try {
       const API_URL = getApiBaseUrl();
-      const response = await fetch(`${API_URL}/api/buildings/all?limit=30000`);
+      const response = await fetch(`${API_URL}/api/buildings/all?limit=200000`);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
