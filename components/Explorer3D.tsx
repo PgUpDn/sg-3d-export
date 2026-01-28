@@ -1,20 +1,27 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
+import Map from 'react-map-gl/maplibre';
 import DeckGL from '@deck.gl/react';
-import { GeoJsonLayer } from '@deck.gl/layers';
-import { Map } from 'react-map-gl/maplibre';
+import { ColumnLayer } from '@deck.gl/layers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
-// Singapore center coordinates
+const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+
+// Singapore center
 const INITIAL_VIEW_STATE = {
   longitude: 103.8198,
   latitude: 1.3521,
   zoom: 11,
   pitch: 45,
-  bearing: 0
+  bearing: -20,
 };
 
-// Free map style
-const MAP_STYLE = 'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+// API URL
+function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+    return 'http://localhost:8000';
+  }
+  return 'https://52.203.122.189.nip.io';
+}
 
 interface Building {
   lat: number;
@@ -28,100 +35,135 @@ interface Explorer3DProps {
 }
 
 const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
-  const [buildings, setBuildings] = useState<any>(null);
+  const [buildings, setBuildings] = useState<Building[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [viewState, setViewState] = useState(INITIAL_VIEW_STATE);
-  const [stats, setStats] = useState({ count: 0, loaded: false });
+  const [heightScale, setHeightScale] = useState(3);
+  const [showMap, setShowMap] = useState(true);
 
-  // Get API base URL
-  const getApiBaseUrl = () => {
-    if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
-      return 'http://localhost:8000';
-    }
-    return 'https://52.203.122.189.nip.io';
-  };
-
-  // Fetch building data
+  // Fetch buildings from API
   const fetchBuildings = useCallback(async () => {
-    if (!backendAvailable) {
-      setError('Backend not available');
-      setLoading(false);
-      return;
-    }
-
+    setLoading(true);
+    setError(null);
+    
     try {
-      setLoading(true);
-      setError(null);
+      const API_URL = getApiBaseUrl();
+      const response = await fetch(`${API_URL}/api/buildings/all?limit=30000`);
       
-      // Limit to 30000 buildings for performance (still ~10MB)
-      const response = await fetch(`${getApiBaseUrl()}/api/buildings/geojson?limit=30000`, {
-        signal: AbortSignal.timeout(60000) // 60 second timeout
-      });
-      if (!response.ok) throw new Error('Failed to fetch buildings');
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
       
       const data = await response.json();
-      setBuildings(data);
-      setStats({ count: data.features.length, loaded: true });
-      setLoading(false);
+      
+      if (data.buildings && Array.isArray(data.buildings)) {
+        setBuildings(data.buildings);
+      } else {
+        throw new Error('Invalid response format');
+      }
     } catch (err: any) {
-      console.error('Error fetching buildings:', err);
-      setError(err.message || 'Request timed out');
+      console.error('Failed to fetch buildings:', err);
+      setError(err.message || 'Failed to fetch buildings');
+    } finally {
       setLoading(false);
     }
-  }, [backendAvailable]);
+  }, []);
 
   useEffect(() => {
     fetchBuildings();
   }, [fetchBuildings]);
 
-  // Create the 3D buildings layer
-  const layers = buildings ? [
-    new GeoJsonLayer({
-      id: 'buildings-3d',
+  // Create deck.gl layer
+  const layers = [
+    new ColumnLayer({
+      id: 'buildings-layer',
       data: buildings,
+      diskResolution: 6,
+      radius: 25,
       extruded: true,
-      wireframe: false,
-      opacity: 0.8,
-      getElevation: (f: any) => f.properties.height || 10,
-      getFillColor: (f: any) => {
-        // Color based on height
-        const height = f.properties.height || 10;
-        if (height > 100) return [59, 130, 246, 200]; // Blue for tall
-        if (height > 50) return [16, 185, 129, 200];  // Green for medium
-        return [99, 102, 241, 200]; // Indigo for short
-      },
-      getLineColor: [80, 80, 80],
-      lineWidthMinPixels: 1,
       pickable: true,
-      autoHighlight: true,
-      highlightColor: [255, 200, 0, 200],
+      elevationScale: heightScale,
+      getPosition: (d: Building) => [d.lon, d.lat],
+      getElevation: (d: Building) => d.height,
+      getFillColor: (d: Building) => {
+        // Color based on height - cyan to teal gradient
+        const h = Math.min(d.height / 150, 1);
+        return [
+          Math.floor(14 + h * 30),   // R: 14-44
+          Math.floor(165 - h * 40),  // G: 165-125
+          Math.floor(164 - h * 30),  // B: 164-134
+          220
+        ];
+      },
+      updateTriggers: {
+        getElevation: heightScale
+      }
     })
-  ] : [];
+  ];
+
+  // Tooltip for building info
+  const getTooltip = ({ object }: { object?: Building }) => {
+    if (!object) return null;
+    return {
+      html: `
+        <div style="padding: 8px; font-family: 'Space Grotesk', sans-serif;">
+          <div style="font-weight: 600; color: #0891b2;">Building</div>
+          <div style="font-size: 12px; color: #64748b; margin-top: 4px;">
+            Height: ${object.height.toFixed(1)}m
+          </div>
+          <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+            ${object.lat.toFixed(6)}, ${object.lon.toFixed(6)}
+          </div>
+        </div>
+      `,
+      style: {
+        backgroundColor: 'white',
+        borderRadius: '8px',
+        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+        border: '1px solid #e2e8f0'
+      }
+    };
+  };
+
+  const resetView = () => {
+    setViewState(INITIAL_VIEW_STATE);
+  };
+
+  const zoomIn = () => {
+    setViewState(prev => ({ ...prev, zoom: prev.zoom + 0.5 }));
+  };
+
+  const zoomOut = () => {
+    setViewState(prev => ({ ...prev, zoom: prev.zoom - 0.5 }));
+  };
 
   return (
     <div className="relative w-full h-full">
       {/* Loading overlay */}
       {loading && (
-        <div className="absolute inset-0 bg-white/80 z-50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-white/90 z-50 flex items-center justify-center">
           <div className="flex flex-col items-center gap-4">
             <div className="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-            <p className="text-sm font-semibold text-slate-600">Loading 3D buildings...</p>
+            <p className="text-sm font-semibold text-slate-600">Loading Singapore Buildings...</p>
+            <p className="text-xs text-slate-400">Fetching data from API</p>
           </div>
         </div>
       )}
 
       {/* Error message */}
       {error && !loading && (
-        <div className="absolute inset-0 bg-white/90 z-50 flex items-center justify-center">
-          <div className="bg-red-50 border border-red-200 rounded-lg p-6 max-w-md text-center">
-            <div className="text-4xl mb-3">⚠️</div>
-            <h3 className="text-red-800 font-bold mb-2">Error Loading Buildings</h3>
-            <p className="text-red-600 text-sm mb-1">{error}</p>
-            <p className="text-red-400 text-xs mb-4">API: {getApiBaseUrl()}</p>
+        <div className="absolute inset-0 bg-white/95 z-50 flex items-center justify-center">
+          <div className="bg-red-50 border border-red-200 rounded-xl p-8 max-w-md text-center shadow-lg">
+            <div className="w-16 h-16 mx-auto mb-4 bg-red-100 rounded-full flex items-center justify-center">
+              <span className="material-symbols-outlined text-3xl text-red-500">error</span>
+            </div>
+            <h3 className="text-red-800 font-bold text-lg mb-2">Failed to Load Buildings</h3>
+            <p className="text-red-600 text-sm mb-4">{error}</p>
+            <p className="text-slate-500 text-xs mb-4">API: {getApiBaseUrl()}</p>
             <button 
               onClick={fetchBuildings}
-              className="px-4 py-2 bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors"
+              className="px-6 py-2 bg-primary text-white rounded-lg font-semibold hover:bg-primary/90 transition-colors"
             >
               Retry
             </button>
@@ -130,89 +172,128 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
       )}
 
       {/* Stats panel */}
-      <div className="absolute top-4 left-4 z-40 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg p-4 border border-slate-200">
+      <div className="absolute top-4 left-4 z-40 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg p-4 border border-slate-200 min-w-[200px]">
         <h3 className="font-bold text-slate-800 flex items-center gap-2">
-          <span className="material-symbols-outlined text-primary">apartment</span>
+          <span className="material-symbols-outlined text-primary">location_city</span>
           Singapore 3D Buildings
         </h3>
-        <div className="mt-2 text-sm text-slate-600">
-          <p><span className="font-semibold">{stats.count.toLocaleString()}</span> buildings loaded</p>
+        <div className="mt-3 space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-slate-500">Buildings loaded</span>
+            <span className="font-semibold text-primary">{buildings.length.toLocaleString()}</span>
+          </div>
+          {buildings.length > 0 && (
+            <>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Max height</span>
+                <span className="font-semibold text-slate-700">
+                  {Math.max(...buildings.map(b => b.height)).toFixed(0)}m
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-slate-500">Avg height</span>
+                <span className="font-semibold text-slate-700">
+                  {(buildings.reduce((sum, b) => sum + b.height, 0) / buildings.length).toFixed(0)}m
+                </span>
+              </div>
+            </>
+          )}
         </div>
-        <div className="mt-3 flex gap-2 text-xs">
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded bg-indigo-500"></span>
-            &lt;50m
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded bg-green-500"></span>
-            50-100m
-          </span>
-          <span className="flex items-center gap-1">
-            <span className="w-3 h-3 rounded bg-blue-500"></span>
-            &gt;100m
-          </span>
+        
+        {/* View mode toggle */}
+        <div className="mt-4 pt-3 border-t border-slate-100">
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input 
+              type="checkbox" 
+              checked={showMap} 
+              onChange={(e) => setShowMap(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            <span className="text-xs text-slate-600">Show base map</span>
+          </label>
         </div>
       </div>
 
       {/* View controls */}
       <div className="absolute bottom-8 left-4 z-40 flex flex-col gap-2">
-        <button 
-          onClick={() => setViewState(v => ({ ...v, pitch: Math.min(v.pitch + 10, 80) }))}
-          className="size-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-md"
-          title="Increase pitch"
+        <button
+          onClick={zoomIn}
+          className="size-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-md transition-colors"
+          title="Zoom in"
         >
-          <span className="material-symbols-outlined">expand_less</span>
+          <span className="material-symbols-outlined">add</span>
         </button>
-        <button 
-          onClick={() => setViewState(v => ({ ...v, pitch: Math.max(v.pitch - 10, 0) }))}
-          className="size-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-md"
-          title="Decrease pitch"
+        <button
+          onClick={zoomOut}
+          className="size-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-md transition-colors"
+          title="Zoom out"
         >
-          <span className="material-symbols-outlined">expand_more</span>
+          <span className="material-symbols-outlined">remove</span>
         </button>
-        <button 
-          onClick={() => setViewState(v => ({ ...v, bearing: v.bearing + 15 }))}
-          className="size-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-md"
-          title="Rotate"
-        >
-          <span className="material-symbols-outlined">rotate_right</span>
-        </button>
-        <button 
-          onClick={() => setViewState(INITIAL_VIEW_STATE)}
-          className="size-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-md"
+        <div className="h-px w-full bg-slate-200 my-1" />
+        <button
+          onClick={resetView}
+          className="size-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-md transition-colors"
           title="Reset view"
         >
           <span className="material-symbols-outlined">restart_alt</span>
         </button>
+        <button
+          onClick={() => setViewState(prev => ({ ...prev, pitch: prev.pitch === 0 ? 45 : 0 }))}
+          className="size-10 bg-white border border-slate-200 rounded-lg flex items-center justify-center hover:bg-slate-50 shadow-md transition-colors"
+          title="Toggle 3D/2D"
+        >
+          <span className="material-symbols-outlined">{viewState.pitch > 0 ? '3d_rotation' : 'map'}</span>
+        </button>
       </div>
 
-      {/* Pitch indicator */}
-      <div className="absolute bottom-8 right-4 z-40 bg-white/95 backdrop-blur-sm rounded-lg shadow-md px-3 py-2 border border-slate-200">
-        <div className="text-xs text-slate-500">Pitch: {viewState.pitch.toFixed(0)}°</div>
-        <div className="text-xs text-slate-500">Bearing: {viewState.bearing.toFixed(0)}°</div>
+      {/* Height scale control */}
+      <div className="absolute bottom-8 right-4 z-40 bg-white/95 backdrop-blur-sm rounded-xl shadow-lg px-4 py-3 border border-slate-200 w-56">
+        <div className="flex items-center justify-between mb-2">
+          <span className="text-xs font-semibold text-slate-600">Height Scale</span>
+          <span className="text-xs font-bold text-primary">{heightScale}x</span>
+        </div>
+        <input
+          type="range"
+          min="1"
+          max="10"
+          step="0.5"
+          value={heightScale}
+          onChange={(e) => setHeightScale(Number(e.target.value))}
+          className="w-full accent-primary"
+        />
+        <div className="flex justify-between text-[10px] text-slate-400 mt-1">
+          <span>1x</span>
+          <span>10x</span>
+        </div>
+      </div>
+
+      {/* Backend status indicator */}
+      <div className="absolute top-4 right-4 z-40">
+        <div className={`bg-white/95 backdrop-blur-sm border px-3 py-2 rounded-lg flex items-center gap-2 shadow-md ${
+          backendAvailable ? 'border-green-200' : 'border-orange-200'
+        }`}>
+          <span className={`size-2 rounded-full ${backendAvailable ? 'bg-green-500' : 'bg-orange-400'}`}></span>
+          <span className="text-xs font-semibold text-slate-600">
+            {backendAvailable ? 'API Connected' : 'API Offline'}
+          </span>
+        </div>
       </div>
 
       {/* DeckGL Map */}
       <DeckGL
         viewState={viewState}
-        onViewStateChange={({ viewState: newViewState }: any) => setViewState(newViewState)}
+        onViewStateChange={({ viewState: newViewState }) => setViewState(newViewState as typeof INITIAL_VIEW_STATE)}
         controller={true}
-        layers={layers}
-        getTooltip={({ object }: any) => object && {
-          html: `<div class="p-2 bg-white rounded shadow-lg">
-            <div class="font-bold text-slate-800">Building</div>
-            <div class="text-sm text-slate-600">Height: ${object.properties.height?.toFixed(1) || 'N/A'}m</div>
-          </div>`,
-          style: {
-            backgroundColor: 'transparent',
-            border: 'none'
-          }
-        }}
+        layers={!loading && !error ? layers : []}
+        getTooltip={getTooltip}
       >
-        <Map
-          mapStyle={MAP_STYLE}
-          attributionControl={false}
-        />
+        {showMap && (
+          <Map
+            mapStyle={MAP_STYLE}
+            attributionControl={false}
+          />
+        )}
       </DeckGL>
     </div>
   );
