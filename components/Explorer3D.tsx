@@ -89,30 +89,33 @@ function createBuildingPolygon(lat: number, lon: number, height: number, id: str
   return { polygon, height, id, lat, lon };
 }
 
-// Height-based color scheme (blue to orange gradient like real city visualizations)
-function getColorFromHeight(height: number, maxHeight: number): [number, number, number, number] {
-  const normalized = Math.min(height / maxHeight, 1);
-  
-  // Color gradient: dark blue -> cyan -> yellow -> orange -> red
-  if (normalized < 0.2) {
-    // Dark blue to blue
-    return [30, 60, 114 + normalized * 200, 220];
-  } else if (normalized < 0.4) {
+// Height-based color scheme using percentile (0-1) for better distribution
+function getColorFromPercentile(percentile: number): [number, number, number, number] {
+  // Color gradient: dark blue -> blue -> cyan -> green -> yellow -> orange -> red
+  if (percentile < 0.15) {
+    // Dark blue
+    const t = percentile / 0.15;
+    return [20, 40 + t * 40, 100 + t * 50, 200];
+  } else if (percentile < 0.35) {
     // Blue to cyan
-    const t = (normalized - 0.2) / 0.2;
-    return [30 + t * 70, 100 + t * 80, 180 + t * 40, 220];
-  } else if (normalized < 0.6) {
-    // Cyan to yellow
-    const t = (normalized - 0.4) / 0.2;
-    return [100 + t * 155, 180 - t * 30, 220 - t * 180, 230];
-  } else if (normalized < 0.8) {
+    const t = (percentile - 0.15) / 0.2;
+    return [20 + t * 30, 80 + t * 100, 150 + t * 70, 210];
+  } else if (percentile < 0.55) {
+    // Cyan to green
+    const t = (percentile - 0.35) / 0.2;
+    return [50 + t * 50, 180 - t * 20, 220 - t * 100, 220];
+  } else if (percentile < 0.75) {
+    // Green to yellow
+    const t = (percentile - 0.55) / 0.2;
+    return [100 + t * 155, 160 + t * 60, 120 - t * 80, 230];
+  } else if (percentile < 0.90) {
     // Yellow to orange
-    const t = (normalized - 0.6) / 0.2;
-    return [255, 150 - t * 80, 40 - t * 30, 240];
+    const t = (percentile - 0.75) / 0.15;
+    return [255, 220 - t * 100, 40 - t * 30, 240];
   } else {
-    // Orange to red
-    const t = (normalized - 0.8) / 0.2;
-    return [255, 70 - t * 40, 10, 250];
+    // Orange to red (top 10%)
+    const t = (percentile - 0.90) / 0.10;
+    return [255, 120 - t * 80, 10, 250];
   }
 }
 
@@ -164,16 +167,37 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
     fetchBuildings();
   }, [fetchBuildings]);
 
-  // Process buildings into polygons
-  const { buildingPolygons, maxHeight, stats } = useMemo(() => {
+  // Process buildings into polygons with percentile ranking
+  const { buildingPolygons, maxHeight, stats, heightPercentiles } = useMemo(() => {
     if (buildings.length === 0) {
-      return { buildingPolygons: [], maxHeight: 100, stats: { min: 0, max: 0, avg: 0 } };
+      return { 
+        buildingPolygons: [], 
+        maxHeight: 100, 
+        stats: { min: 0, max: 0, avg: 0 },
+        heightPercentiles: new Map()
+      };
     }
     
     const heights = buildings.map(b => b.height);
     const max = Math.max(...heights);
     const min = Math.min(...heights);
     const avg = heights.reduce((a, b) => a + b, 0) / heights.length;
+    
+    // Sort heights to calculate percentiles
+    const sortedHeights = [...heights].sort((a, b) => a - b);
+    
+    // Create a map of height -> percentile (0-1)
+    const percentileMap = new Map<number, number>();
+    buildings.forEach(b => {
+      // Binary search to find position
+      let left = 0, right = sortedHeights.length - 1;
+      while (left < right) {
+        const mid = Math.floor((left + right) / 2);
+        if (sortedHeights[mid] < b.height) left = mid + 1;
+        else right = mid;
+      }
+      percentileMap.set(b.height, left / sortedHeights.length);
+    });
     
     const polygons = buildings.map(b => 
       createBuildingPolygon(b.lat, b.lon, b.height, b.id)
@@ -182,7 +206,8 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
     return { 
       buildingPolygons: polygons, 
       maxHeight: max,
-      stats: { min, max, avg }
+      stats: { min, max, avg },
+      heightPercentiles: percentileMap
     };
   }, [buildings]);
 
@@ -201,10 +226,13 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
         opacity: 0.9,
         getPolygon: (d: BuildingPolygon) => d.polygon,
         getElevation: (d: BuildingPolygon) => d.height * heightScale,
-        getFillColor: (d: BuildingPolygon) => 
-          colorMode === 'height' 
-            ? getColorFromHeight(d.height, maxHeight)
-            : [14, 165, 164, 200], // Uniform teal color
+        getFillColor: (d: BuildingPolygon) => {
+          if (colorMode !== 'height') {
+            return [14, 165, 164, 200]; // Uniform teal color
+          }
+          const percentile = heightPercentiles.get(d.height) || 0.5;
+          return getColorFromPercentile(percentile);
+        },
         getLineColor: [80, 80, 80, 50],
         getLineWidth: 1,
         pickable: true,
@@ -216,11 +244,11 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
         },
         updateTriggers: {
           getElevation: heightScale,
-          getFillColor: [colorMode, maxHeight],
+          getFillColor: [colorMode, heightPercentiles],
         }
       }),
     ];
-  }, [buildingPolygons, heightScale, maxHeight, colorMode]);
+  }, [buildingPolygons, heightScale, maxHeight, colorMode, heightPercentiles]);
 
   // Tooltip for building info
   const getTooltip = useCallback(({ object }: { object?: BuildingPolygon }) => {
@@ -324,13 +352,14 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
         {/* Height color legend */}
         {colorMode === 'height' && buildings.length > 0 && (
           <div className="mt-4 pt-3 border-t border-slate-700">
-            <div className="text-xs text-slate-400 mb-2">Height Legend</div>
+            <div className="text-xs text-slate-400 mb-2">Height (Percentile)</div>
             <div className="h-3 rounded-full overflow-hidden" style={{
-              background: 'linear-gradient(to right, #1e3c72, #64b5f6, #ffeb3b, #ff9800, #f44336)'
+              background: 'linear-gradient(to right, #142864, #32b4dc, #64c850, #ffdc00, #ff8c00, #ff3232)'
             }}></div>
             <div className="flex justify-between text-[10px] text-slate-500 mt-1">
-              <span>{stats.min.toFixed(0)}m</span>
-              <span>{stats.max.toFixed(0)}m</span>
+              <span>Low</span>
+              <span>50%</span>
+              <span>High</span>
             </div>
           </div>
         )}
