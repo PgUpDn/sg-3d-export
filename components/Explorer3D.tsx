@@ -2,7 +2,6 @@ import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import Map from 'react-map-gl/maplibre';
 import DeckGL from '@deck.gl/react';
 import { PolygonLayer } from '@deck.gl/layers';
-import { GeoJsonLayer } from '@deck.gl/layers';
 import 'maplibre-gl/dist/maplibre-gl.css';
 
 // Dark map style for better 3D effect
@@ -187,38 +186,12 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
     };
   }, [buildings]);
 
-  // Singapore boundary polygon for visualization
-  const singaporeBoundary = useMemo(() => ({
-    type: 'Feature',
-    properties: {},
-    geometry: {
-      type: 'Polygon',
-      coordinates: [[
-        [103.60, 1.15],
-        [104.05, 1.15],
-        [104.05, 1.47],
-        [103.60, 1.47],
-        [103.60, 1.15],
-      ]]
-    }
-  }), []);
 
   // Create deck.gl layers
   const layers = useMemo(() => {
     if (buildingPolygons.length === 0) return [];
 
     return [
-      // Singapore boundary outline
-      new GeoJsonLayer({
-        id: 'singapore-boundary',
-        data: singaporeBoundary,
-        filled: false,
-        stroked: true,
-        lineWidthMinPixels: 2,
-        getLineColor: [100, 180, 255, 150],
-        getLineWidth: 500,
-      }),
-      
       // 3D Buildings
       new PolygonLayer({
         id: 'buildings-3d',
@@ -247,7 +220,7 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
         }
       }),
     ];
-  }, [buildingPolygons, heightScale, maxHeight, colorMode, singaporeBoundary]);
+  }, [buildingPolygons, heightScale, maxHeight, colorMode]);
 
   // Tooltip for building info
   const getTooltip = useCallback(({ object }: { object?: BuildingPolygon }) => {
