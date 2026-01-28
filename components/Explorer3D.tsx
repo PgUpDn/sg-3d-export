@@ -178,10 +178,16 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
       };
     }
     
-    const heights = buildings.map(b => b.height);
-    const max = Math.max(...heights);
-    const min = Math.min(...heights);
-    const avg = heights.reduce((a, b) => a + b, 0) / heights.length;
+    // Calculate stats without spread operator (avoid stack overflow with large arrays)
+    let max = -Infinity;
+    let min = Infinity;
+    let sum = 0;
+    for (const b of buildings) {
+      if (b.height > max) max = b.height;
+      if (b.height < min) min = b.height;
+      sum += b.height;
+    }
+    const avg = sum / buildings.length;
     
     // Sort buildings by height to calculate percentiles
     const sortedBuildings = [...buildings].sort((a, b) => a.height - b.height);
