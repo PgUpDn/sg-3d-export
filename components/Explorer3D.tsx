@@ -136,7 +136,7 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
     
     try {
       const API_URL = getApiBaseUrl();
-      const response = await fetch(`${API_URL}/api/buildings/all?limit=50000`);
+      const response = await fetch(`${API_URL}/api/buildings/all?limit=30000`);
       
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -178,33 +178,42 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
       };
     }
     
-    // Calculate stats without spread operator (avoid stack overflow with large arrays)
-    let max = -Infinity;
-    let min = Infinity;
-    let sum = 0;
-    for (const b of buildings) {
-      if (b.height > max) max = b.height;
-      if (b.height < min) min = b.height;
-      sum += b.height;
+    try {
+      // Calculate stats without spread operator (avoid stack overflow with large arrays)
+      let max = -Infinity;
+      let min = Infinity;
+      let sum = 0;
+      for (let i = 0; i < buildings.length; i++) {
+        const h = buildings[i].height;
+        if (h > max) max = h;
+        if (h < min) min = h;
+        sum += h;
+      }
+      const avg = sum / buildings.length;
+      
+      // Simple percentile: (height - min) / (max - min)
+      const range = max - min || 1;
+      
+      const polygons: BuildingPolygon[] = [];
+      for (let i = 0; i < buildings.length; i++) {
+        const b = buildings[i];
+        const percentile = (b.height - min) / range;
+        polygons.push(createBuildingPolygon(b.lat, b.lon, b.height, b.id, percentile));
+      }
+      
+      return { 
+        buildingPolygons: polygons, 
+        maxHeight: max,
+        stats: { min, max, avg }
+      };
+    } catch (err) {
+      console.error('Error processing buildings:', err);
+      return { 
+        buildingPolygons: [], 
+        maxHeight: 100, 
+        stats: { min: 0, max: 0, avg: 0 }
+      };
     }
-    const avg = sum / buildings.length;
-    
-    // Sort buildings by height to calculate percentiles
-    const sortedBuildings = [...buildings].sort((a, b) => a.height - b.height);
-    const percentileMap = new Map<string, number>();
-    sortedBuildings.forEach((b, index) => {
-      percentileMap.set(b.id, index / sortedBuildings.length);
-    });
-    
-    const polygons = buildings.map(b => 
-      createBuildingPolygon(b.lat, b.lon, b.height, b.id, percentileMap.get(b.id) || 0.5)
-    );
-    
-    return { 
-      buildingPolygons: polygons, 
-      maxHeight: max,
-      stats: { min, max, avg }
-    };
   }, [buildings]);
 
 
