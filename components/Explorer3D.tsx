@@ -47,6 +47,7 @@ interface BuildingPolygon {
   id: string;
   lat: number;
   lon: number;
+  percentile: number;
 }
 
 interface Explorer3DProps {
@@ -54,7 +55,7 @@ interface Explorer3DProps {
 }
 
 // Create rectangular building footprint from point
-function createBuildingPolygon(lat: number, lon: number, height: number, id: string): BuildingPolygon {
+function createBuildingPolygon(lat: number, lon: number, height: number, id: string, percentile: number): BuildingPolygon {
   // Building footprint size based on height (taller buildings tend to be larger)
   const baseSize = 0.00015; // ~15m base
   const sizeMultiplier = Math.min(1 + (height / 200), 2); // Scale with height
@@ -86,7 +87,7 @@ function createBuildingPolygon(lat: number, lon: number, height: number, id: str
   ]);
   polygon.push(polygon[0]); // Close the polygon
   
-  return { polygon, height, id, lat, lon };
+  return { polygon, height, id, lat, lon, percentile };
 }
 
 // Height-based color scheme using percentile (0-1) for better distribution
@@ -168,13 +169,12 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
   }, [fetchBuildings]);
 
   // Process buildings into polygons with percentile ranking
-  const { buildingPolygons, maxHeight, stats, heightPercentiles } = useMemo(() => {
+  const { buildingPolygons, maxHeight, stats } = useMemo(() => {
     if (buildings.length === 0) {
       return { 
         buildingPolygons: [], 
         maxHeight: 100, 
-        stats: { min: 0, max: 0, avg: 0 },
-        heightPercentiles: new Map()
+        stats: { min: 0, max: 0, avg: 0 }
       };
     }
     
@@ -183,31 +183,21 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
     const min = Math.min(...heights);
     const avg = heights.reduce((a, b) => a + b, 0) / heights.length;
     
-    // Sort heights to calculate percentiles
-    const sortedHeights = [...heights].sort((a, b) => a - b);
-    
-    // Create a map of height -> percentile (0-1)
-    const percentileMap = new Map<number, number>();
-    buildings.forEach(b => {
-      // Binary search to find position
-      let left = 0, right = sortedHeights.length - 1;
-      while (left < right) {
-        const mid = Math.floor((left + right) / 2);
-        if (sortedHeights[mid] < b.height) left = mid + 1;
-        else right = mid;
-      }
-      percentileMap.set(b.height, left / sortedHeights.length);
+    // Sort buildings by height to calculate percentiles
+    const sortedBuildings = [...buildings].sort((a, b) => a.height - b.height);
+    const percentileMap = new Map<string, number>();
+    sortedBuildings.forEach((b, index) => {
+      percentileMap.set(b.id, index / sortedBuildings.length);
     });
     
     const polygons = buildings.map(b => 
-      createBuildingPolygon(b.lat, b.lon, b.height, b.id)
+      createBuildingPolygon(b.lat, b.lon, b.height, b.id, percentileMap.get(b.id) || 0.5)
     );
     
     return { 
       buildingPolygons: polygons, 
       maxHeight: max,
-      stats: { min, max, avg },
-      heightPercentiles: percentileMap
+      stats: { min, max, avg }
     };
   }, [buildings]);
 
@@ -230,8 +220,7 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
           if (colorMode !== 'height') {
             return [14, 165, 164, 200]; // Uniform teal color
           }
-          const percentile = heightPercentiles.get(d.height) || 0.5;
-          return getColorFromPercentile(percentile);
+          return getColorFromPercentile(d.percentile);
         },
         getLineColor: [80, 80, 80, 50],
         getLineWidth: 1,
@@ -244,11 +233,11 @@ const Explorer3D: React.FC<Explorer3DProps> = ({ backendAvailable }) => {
         },
         updateTriggers: {
           getElevation: heightScale,
-          getFillColor: [colorMode, heightPercentiles],
+          getFillColor: colorMode,
         }
       }),
     ];
-  }, [buildingPolygons, heightScale, maxHeight, colorMode, heightPercentiles]);
+  }, [buildingPolygons, heightScale, colorMode]);
 
   // Tooltip for building info
   const getTooltip = useCallback(({ object }: { object?: BuildingPolygon }) => {
